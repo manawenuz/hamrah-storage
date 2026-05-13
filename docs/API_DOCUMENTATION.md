@@ -39,7 +39,13 @@ All API requests (except login) require the JWT Bearer Token:
 ### List Objects
 Retrieves the files and directories inside your drive.
 - **Endpoint:** `GET https://abrehamrahi.ir/api/v2/flat/list-objects/?is_trash=false&limit=1000`
-- **Response:** Returns an array/object containing file details, importantly the `obj_id` (Resource ID) which is required for link management and deletion.
+- **Response:** A JSON object with a `results` array. Each entry includes:
+  - `id` — internal object ID (required for delete/share)
+  - `name` — stored filename
+  - `size` — file size in bytes
+  - `last_modified` — Unix timestamp
+  - `type` — MIME type (e.g. `binary/octet-stream`)
+  - `download_url` — direct CDN URL for downloading the file (e.g. `https://abrehamrahi.ir/o/...`)
 
 ---
 
@@ -81,13 +87,27 @@ Finalizes the upload and registers the file in your drive.
         "size": 1042
       }
     ],
-    "force_overwrite": false
+    "force_overwrite": true
   }
   ```
+- **Notes:**
+  - Set `force_overwrite: true` when re-uploading a file that may already exist (e.g. content-addressed storage). The server replaces the existing entry.
+  - The `name` field in `complete-upload` is the logical filename stored in the listing. For the S3 proxy, this is the percent-encoded S3 key (e.g. `path%2Fto%2Ffile.bin`).
 
 ---
 
-## 4. Public Link Management (Publishing)
+## 4. Downloading a File
+
+Use the `download_url` field returned by the List Objects API. This is a direct CDN URL that accepts the Bearer token.
+
+- **Method:** `GET`
+- **URL:** Value of `download_url` from the listing (e.g. `https://abrehamrahi.ir/o/<token>/`)
+- **Headers:** `Authorization: Bearer <your_access_token>`
+- **Response:** Raw file bytes.
+
+---
+
+## 5. Public Link Management (Publishing)
 
 Once a file is uploaded, you can generate a public download link.
 
@@ -112,7 +132,7 @@ Once a file is uploaded, you can generate a public download link.
 
 ---
 
-## 5. Deleting a File (Move to Trash)
+## 6. Deleting a File (Move to Trash)
 To move a file to the trashcan:
 - **Method:** `DELETE`
 - **Endpoint:** `https://abrehamrahi.ir/api/v2/rgw/trash-objects/`
@@ -120,7 +140,7 @@ To move a file to the trashcan:
 
 ---
 
-## 6. Contacts & Private Sharing
+## 7. Contacts & Private Sharing
 You can share files privately with specific users by adding them as contacts.
 
 ### Add Contact

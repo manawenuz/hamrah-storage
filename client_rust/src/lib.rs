@@ -210,7 +210,7 @@ impl HamrahClient {
         self.fetch_objects().await
     }
 
-    pub async fn upload_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn upload_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let path = path.as_ref();
         let file_name = path.file_name().ok_or("Invalid filename")?.to_str().ok_or("Filename not unicode")?;
         let mut file = std::fs::File::open(path)?;
@@ -219,7 +219,22 @@ impl HamrahClient {
         self.upload_bytes(file_name, buffer).await
     }
 
-    pub async fn upload_bytes(&self, name: &str, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn upload_bytes(&mut self, name: &str, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+        // Convert error to String before any await so the future stays Send
+        let first_err = match self.upload_bytes_inner(name, data.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) => e.to_string(),
+        };
+        if first_err.contains("401") || first_err.contains("token_not_valid") || first_err.contains("Token is expired") || first_err.contains("503") {
+            eprintln!("[upload_bytes] token expired, re-logging in...");
+            self.relogin().await?;
+            self.upload_bytes_inner(name, data).await
+        } else {
+            Err(first_err.into())
+        }
+    }
+
+    async fn upload_bytes_inner(&self, name: &str, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         let size = data.len() as u64;
 
         let start_resp = self.authed_request(reqwest::Method::POST, "/api/v2/flat/start-upload/")
@@ -282,7 +297,7 @@ impl HamrahClient {
                 "name": name,
                 "upload_id": start_data.upload_id,
                 "parts": parts,
-                "force_overwrite": false
+                "force_overwrite": true
             }))
             .send()
             .await?;

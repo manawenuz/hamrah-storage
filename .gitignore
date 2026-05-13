@@ -1,0 +1,12 @@
+node_modules/
+auth.json
+api_flow.json
+dom_elements.json
+last_page.html
+menu_text.txt
+requests.json
+*.png
+*.html
+*.txt
+trace.zip
+.DS_Store

@@ -88,6 +88,17 @@ impl HamrahClient {
     pub async fn login(&mut self, phone: &str, password: &str) -> Result<(), Box<dyn std::error::Error>> {
         let phone_num = if phone.starts_with('0') { &phone[1..] } else { phone };
         
+        // Try to load session first
+        if let Some(token) = self.load_session(phone_num).await {
+            self.token = Some(token);
+            // Verify token with a simple request
+            if self.list_objects().await.is_ok() {
+                println!("Reusing existing session for {}", phone_num);
+                return Ok(());
+            }
+            self.token = None;
+        }
+
         let payload = json!({
             "phone": phone_num,
             "prefix": "+98",
@@ -110,7 +121,13 @@ impl HamrahClient {
         let json_body: serde_json::Value = serde_json::from_str(&body_text)?;
         
         if let Some(access) = json_body.get("access").and_then(|v| v.as_str()) {
-             self.token = Some(access.to_string());
+             let token = access.to_string();
+             self.token = Some(token.clone());
+             self.save_session(phone_num, &token).await?;
+        } else if let Some(access) = json_body.get("token").and_then(|t| t.get("access")).and_then(|v| v.as_str()) {
+             let token = access.to_string();
+             self.token = Some(token.clone());
+             self.save_session(phone_num, &token).await?;
         }
 
         let set_cookies = headers.get_all("Set-Cookie");
@@ -316,5 +333,16 @@ impl HamrahClient {
         } else {
             Err(format!("Share file failed: {}", resp.text().await?).into())
         }
+    }
+
+    async fn save_session(&self, phone: &str, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let session_file = format!(".session_{}", phone);
+        std::fs::write(session_file, token)?;
+        Ok(())
+    }
+
+    async fn load_session(&self, phone: &str) -> Option<String> {
+        let session_file = format!(".session_{}", phone);
+        std::fs::read_to_string(session_file).ok()
     }
 }

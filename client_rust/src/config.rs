@@ -18,7 +18,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)?;
         
         // Simple expansion of ${VAR}
         use regex::Regex;

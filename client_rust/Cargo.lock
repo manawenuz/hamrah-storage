@@ -245,6 +245,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "log",
+ "regex",
  "reqwest",
  "s3s",
  "serde",

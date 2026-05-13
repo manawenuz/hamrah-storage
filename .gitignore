@@ -1,12 +1,31 @@
+# Rust
+**/target/
+Cargo.lock
+
+# Node
 node_modules/
-auth.json
-api_flow.json
-dom_elements.json
-last_page.html
-menu_text.txt
-requests.json
-*.png
-*.html
-*.txt
-trace.zip
+npm-debug.log*
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Env
+.env
+config.yaml
+
+# Local
+dashboard.html
+dashboard.png
+my_files_screenshot.png
+api_flow_*.json
+record_*.js
+test_*.js
+screenshot.js
+dump_dom.js
+explore.js
+fetch_objects.js
+check_menu.js
+login.js
+HamrahClient.js
+HamrahClient.js.bak

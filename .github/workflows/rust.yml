@@ -54,3 +54,39 @@ jobs:
       with:
         name: client_rust-macos
         path: client_rust/target/release/client_rust
+
+  # Attach binaries to the GitHub release (only on version tags)
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: client_rust-x86_64-unknown-linux-gnu
+        path: artifacts/linux
+    - uses: actions/download-artifact@v4
+      with:
+        name: client_rust-x86_64-pc-windows-msvc
+        path: artifacts/windows
+    - uses: actions/download-artifact@v4
+      with:
+        name: client_rust-macos
+        path: artifacts/macos
+    - name: Rename binaries
+      run: |
+        mv artifacts/linux/client_rust  artifacts/client_rust-linux-x86_64
+        mv artifacts/windows/client_rust.exe artifacts/client_rust-windows-x86_64.exe
+        mv artifacts/macos/client_rust   artifacts/client_rust-macos
+        chmod +x artifacts/client_rust-linux-x86_64 artifacts/client_rust-macos
+    - name: Upload to release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release upload ${{ github.ref_name }} \
+          artifacts/client_rust-linux-x86_64 \
+          artifacts/client_rust-windows-x86_64.exe \
+          artifacts/client_rust-macos \
+          --repo ${{ github.repository }} --clobber

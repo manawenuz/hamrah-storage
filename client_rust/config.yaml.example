@@ -1,8 +1,11 @@
 accounts:
-  default:
+  my_account:
     phone: "912XXXXXXX"
     password: "YourPassword"
-    webdav_user: "admin"
-    webdav_pass: "admin"
 # proxy: "http://127.0.0.1:8888" # Optional
-s3_port: 8080
+mc:
+  host: "127.0.0.1"
+  port: 8080
+  bucket: "my_account"
+  access_key: "anything"
+  secret_key: "anything"

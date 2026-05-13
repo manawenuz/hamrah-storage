@@ -2,7 +2,14 @@ use clap::{Parser, Subcommand};
 use client_rust::HamrahClient;
 use client_rust::config::AppConfig;
 use client_rust::s3_backend::HamrahS3Backend;
+use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
+use s3s::validation::NameValidation;
+
+struct AnyName;
+impl NameValidation for AnyName {
+    fn validate_bucket_name(&self, _: &str) -> bool { true }
+}
 use std::net::SocketAddr;
 
 #[derive(Parser)]
@@ -19,8 +26,8 @@ struct Cli {
 enum Commands {
     /// Start an S3-compatible server
     S3 {
-        #[arg(short, long, default_value_t = 8080)]
-        port: u16,
+        #[arg(short, long)]
+        port: Option<u16>,
         #[arg(short, long)]
         account: Option<String>,
     },
@@ -42,12 +49,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     
     let config = AppConfig::from_file(&cli.config)?;
-    let proxy = config.proxy.as_deref();
+    let proxy = config.proxy.as_deref().filter(|s| !s.is_empty());
 
     match cli.command {
         Commands::S3 { port, account: _ } => {
+            let mc = config.mc.as_ref();
+            let bind_port = port
+                .or_else(|| mc.map(|m| m.port))
+                .unwrap_or(8080);
+
             let mut clients = std::collections::HashMap::new();
-            
+
             for (name, acc) in &config.accounts {
                 println!("Logging in to account: {}...", name);
                 let mut client = HamrahClient::new(proxy);
@@ -62,14 +74,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if clients.is_empty() {
                 return Err("No accounts successfully logged in".into());
             }
-            
-            let backend = HamrahS3Backend::new(clients);
-            let service = S3ServiceBuilder::new(backend).build();
 
-            let addr = SocketAddr::from(([127, 0, 0, 1], port));
+            let backend = HamrahS3Backend::new(clients);
+            let mut builder = S3ServiceBuilder::new(backend);
+            builder.set_validation(AnyName);
+            if let Some(mc) = mc {
+                builder.set_auth(SimpleAuth::from_single(&mc.access_key, mc.secret_key.as_str()));
+            }
+            let service = builder.build();
+
+            let addr = SocketAddr::from(([127, 0, 0, 1], bind_port));
             let listener = tokio::net::TcpListener::bind(addr).await?;
             println!("Starting S3-compatible server on http://{}", addr);
             println!("Buckets available: {:?}", config.accounts.keys().collect::<Vec<_>>());
+            if let Some(mc) = mc {
+                println!("mc alias:  {}", mc.alias_cmd("hamrah"));
+            }
             
             loop {
                 let (stream, _) = listener.accept().await?;

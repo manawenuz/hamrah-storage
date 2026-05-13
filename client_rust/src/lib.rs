@@ -10,6 +10,12 @@ use std::path::Path;
 pub struct Object {
     pub id: u64,
     pub name: String,
+    pub size: Option<u64>,
+    pub last_modified: Option<i64>,
+    pub etag: Option<String>,
+    #[serde(rename = "type")]
+    pub content_type: Option<String>,
+    pub download_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,6 +27,7 @@ struct ListObjectsResponse {
 struct StartUploadResponse {
     pub upload_id: String,
     pub key: String,
+    pub chunk_size: u64,
     pub signed_urls: Vec<String>,
 }
 
@@ -54,6 +61,8 @@ pub struct HamrahClient {
     client: Client,
     token: Option<String>,
     base_url: String,
+    phone: Option<String>,
+    password: Option<String>,
 }
 
 impl HamrahClient {
@@ -74,7 +83,8 @@ impl HamrahClient {
 
         let client = client_builder
             .default_headers(headers)
-            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(600))
             .build()
             .expect("Failed to build reqwest client");
 
@@ -82,17 +92,28 @@ impl HamrahClient {
             client,
             token: None,
             base_url: "https://abrehamrahi.ir".to_string(),
+            phone: None,
+            password: None,
         }
     }
 
+    async fn relogin(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let phone = self.phone.clone().ok_or("no credentials stored")?;
+        let password = self.password.clone().ok_or("no credentials stored")?;
+        self.token = None;
+        self.login(&phone, &password).await
+    }
+
     pub async fn login(&mut self, phone: &str, password: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.phone = Some(phone.to_string());
+        self.password = Some(password.to_string());
         let phone_num = if phone.starts_with('0') { &phone[1..] } else { phone };
         
         // Try to load session first
         if let Some(token) = self.load_session(phone_num).await {
             self.token = Some(token);
             // Verify token with a simple request
-            if self.list_objects().await.is_ok() {
+            if self.fetch_objects().await.is_ok() {
                 println!("Reusing existing session for {}", phone_num);
                 return Ok(());
             }
@@ -170,61 +191,107 @@ impl HamrahClient {
         rb
     }
 
-    pub async fn list_objects(&self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
+    async fn fetch_objects(&self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
         let resp = self.authed_request(reqwest::Method::GET, "/api/v2/flat/list-objects/?is_trash=false&limit=1000")
             .send()
             .await?;
-        
+        if !resp.status().is_success() {
+            return Err(format!("list failed: {}", resp.status()).into());
+        }
         let data: ListObjectsResponse = resp.json().await?;
         Ok(data.results)
+    }
+
+    pub async fn list_objects(&mut self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
+        let needs_refresh = self.fetch_objects().await.is_err();
+        if needs_refresh {
+            self.relogin().await?;
+        }
+        self.fetch_objects().await
     }
 
     pub async fn upload_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let path = path.as_ref();
         let file_name = path.file_name().ok_or("Invalid filename")?.to_str().ok_or("Filename not unicode")?;
         let mut file = std::fs::File::open(path)?;
-        let metadata = file.metadata()?;
-        let size = metadata.len();
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+        self.upload_bytes(file_name, buffer).await
+    }
+
+    pub async fn upload_bytes(&self, name: &str, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+        let size = data.len() as u64;
 
         let start_resp = self.authed_request(reqwest::Method::POST, "/api/v2/flat/start-upload/")
             .json(&json!({ "obj_size": size }))
             .send()
             .await?;
-        
+
         let start_data: StartUploadResponse = start_resp.json().await?;
-        let upload_url = start_data.signed_urls.first().ok_or("No signed upload URL provided")?;
+        let chunk_size = start_data.chunk_size as usize;
 
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
+        // Upload all parts in parallel
+        let upload_futures: Vec<_> = start_data.signed_urls.iter()
+            .zip(data.chunks(chunk_size))
+            .enumerate()
+            .map(|(i, (url, chunk))| {
+                let client = self.client.clone();
+                let url = url.clone();
+                let chunk = chunk.to_vec();
+                async move {
+                    let chunk_len = chunk.len();
+                    let put_resp = client.put(&url)
+                        .header("Content-Type", "application/octet-stream")
+                        .body(chunk)
+                        .send()
+                        .await
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-        let put_resp = self.client.put(upload_url)
-            .header("Content-Type", "application/octet-stream")
-            .body(buffer)
-            .send()
-            .await?;
+                    if !put_resp.status().is_success() {
+                        let msg = format!("PUT part {} failed: {}", i + 1, put_resp.text().await.unwrap_or_default());
+                        return Err(Box::<dyn std::error::Error + Send + Sync>::from(msg));
+                    }
 
-        if !put_resp.status().is_success() {
-            return Err(format!("PUT chunk failed: {}", put_resp.text().await?).into());
-        }
+                    let etag = put_resp.headers().get("ETag")
+                        .ok_or("Missing ETag")?
+                        .to_str()
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+                        .to_string();
 
-        let etag = put_resp.headers().get("ETag")
-            .ok_or("Missing ETag header")?
-            .to_str()?;
+                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>((i + 1, etag, chunk_len))
+                }
+            })
+            .collect();
 
-        let _complete_resp = self.authed_request(reqwest::Method::POST, "/api/v2/flat/complete-upload/")
+        let results = futures_util::future::join_all(upload_futures).await;
+        let mut parts: Vec<(usize, String, usize)> = {
+            let mut acc = Vec::new();
+            for r in results {
+                acc.push(r.map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?);
+            }
+            acc
+        };
+        parts.sort_by_key(|(part_num, _, _)| *part_num);
+        let parts: Vec<_> = parts.into_iter()
+            .map(|(n, etag, size)| json!({ "ETag": etag, "PartNumber": n, "size": size }))
+            .collect();
+
+        let complete_resp = self.authed_request(reqwest::Method::POST, "/api/v2/flat/complete-upload/")
             .json(&json!({
                 "key": start_data.key,
-                "name": file_name,
+                "name": name,
                 "upload_id": start_data.upload_id,
-                "parts": [{
-                    "ETag": etag,
-                    "PartNumber": 1,
-                    "size": size
-                }],
+                "parts": parts,
                 "force_overwrite": false
             }))
             .send()
             .await?;
+
+        if !complete_resp.status().is_success() {
+            let status = complete_resp.status();
+            let body = complete_resp.text().await.unwrap_or_default();
+            return Err(format!("complete-upload failed ({status}): {body}").into());
+        }
 
         Ok(())
     }
@@ -333,6 +400,21 @@ impl HamrahClient {
         } else {
             Err(format!("Share file failed: {}", resp.text().await?).into())
         }
+    }
+
+    pub async fn download_object(&self, download_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let resp = self.client.get(download_url)
+            .header("Authorization", format!("Bearer {}", self.token.as_deref().unwrap_or("")))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Download failed ({status}): {body}").into());
+        }
+
+        Ok(resp.bytes().await?.to_vec())
     }
 
     async fn save_session(&self, phone: &str, token: &str) -> Result<(), Box<dyn std::error::Error>> {

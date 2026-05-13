@@ -10,10 +10,32 @@ pub struct AccountConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct McConfig {
+    pub host: String,
+    pub port: u16,
+    pub bucket: String,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+impl McConfig {
+    pub fn endpoint(&self) -> String {
+        format!("http://{}:{}", self.host, self.port)
+    }
+
+    pub fn alias_cmd(&self, alias: &str) -> String {
+        format!(
+            "mc alias set {} {} {} {}",
+            alias, self.endpoint(), self.access_key, self.secret_key
+        )
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub accounts: HashMap<String, AccountConfig>,
     pub proxy: Option<String>,
-    pub s3_port: Option<u16>,
+    pub mc: Option<McConfig>,
 }
 
 impl AppConfig {

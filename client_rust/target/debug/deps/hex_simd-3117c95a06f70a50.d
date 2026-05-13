@@ -1,0 +1,11 @@
+/Users/manwe/CascadeProjects/hamrahStorage/client_rust/target/debug/deps/hex_simd-3117c95a06f70a50.d: /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/lib.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/error.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/check.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/decode.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/encode.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/multiversion.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/heap.rs
+
+/Users/manwe/CascadeProjects/hamrahStorage/client_rust/target/debug/deps/libhex_simd-3117c95a06f70a50.rmeta: /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/lib.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/error.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/check.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/decode.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/encode.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/multiversion.rs /Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/heap.rs
+
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/lib.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/error.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/check.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/decode.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/encode.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/multiversion.rs:
+/Users/manwe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-simd-0.8.0/src/heap.rs:

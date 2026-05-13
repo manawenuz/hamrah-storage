@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use client_rust::HamrahClient;
 use client_rust::config::AppConfig;
 use client_rust::s3_backend::HamrahS3Backend;
-use s3_server::S3ServiceBuilder;
+use s3s::service::S3ServiceBuilder;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -64,9 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             
             let backend = HamrahS3Backend::new(clients);
-            let mut service = S3ServiceBuilder::new(Arc::new(backend));
-            service.set_base_domain(None);
-            let service = service.build();
+            let _service = S3ServiceBuilder::new(backend).build();
 
             let addr = SocketAddr::from(([127, 0, 0, 1], port));
             println!("Starting S3-compatible server on http://{}", addr);

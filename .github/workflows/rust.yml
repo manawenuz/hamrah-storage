@@ -18,10 +18,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --release --verbose
       working-directory: client_rust
+    
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --release --verbose
       working-directory: client_rust
-      if: runner.os != 'Windows' # Skip tests requiring complex env on windows CI for now
+      if: runner.os != 'Windows'
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: client_rust-${{ matrix.os }}
+        path: |
+          client_rust/target/release/client_rust
+          client_rust/target/release/client_rust.exe

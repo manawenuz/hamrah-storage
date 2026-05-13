@@ -36,14 +36,14 @@ Create a `config.yaml` file to manage your accounts and settings:
 ```yaml
 accounts:
   my_personal:
-    phone: "912XXXXXXX" # Your phone without leading zero
-    password: "YourSecretPassword"
+    phone: "${HAMRAH_PHONE}" # Automatically expanded from environment variables
+    password: "${HAMRAH_PASSWORD}"
   backup_account:
     phone: "935XXXXXXX"
     password: "AnotherPassword"
 
-# proxy: "http://127.0.0.1:8888" # Optional proxy (e.g. for debugging)
-s3_port: 8080 # Default port for the S3-compatible server
+# proxy: "${HAMRAH_PROXY}" # Optional proxy
+s3_port: 8080
 ```
 
 ---

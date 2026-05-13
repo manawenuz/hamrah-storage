@@ -18,8 +18,15 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
-        let f = std::fs::File::open(path)?;
-        let config: Self = serde_yaml::from_reader(f)?;
+        let mut content = std::fs::read_to_string(path)?;
+        
+        // Simple expansion of ${VAR}
+        for (key, value) in std::env::vars() {
+            let target = format!("${{{}}}", key);
+            content = content.replace(&target, &value);
+        }
+
+        let config: Self = serde_yaml::from_str(&content)?;
         Ok(config)
     }
 }

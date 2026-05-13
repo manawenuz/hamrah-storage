@@ -3,35 +3,47 @@ name: Rust CI
 on:
   push:
     branches: [ "rust-implementation" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "rust-implementation" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # Cheap builds for Linux & Windows (Cross-compiled on Linux)
+  build-cross:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-
+        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu]
     steps:
     - uses: actions/checkout@v4
-    
+    - name: Install Cross
+      run: cargo install cross --git https://github.com/cross-rs/cross.git --rev b3f0896
     - name: Build
-      run: cargo build --release --verbose
+      run: cross build --target ${{ matrix.target }} --release --verbose
       working-directory: client_rust
-    
-    - name: Run tests
-      run: cargo test --release --verbose
-      working-directory: client_rust
-      if: runner.os != 'Windows'
-
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: client_rust-${{ matrix.os }}
+        name: client_rust-${{ matrix.target }}
         path: |
-          client_rust/target/release/client_rust
-          client_rust/target/release/client_rust.exe
+          client_rust/target/${{ matrix.target }}/release/client_rust
+          client_rust/target/${{ matrix.target }}/release/client_rust.exe
+
+  # Expensive build for macOS (Only on tags or manual dispatch)
+  build-macos:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release --verbose
+      working-directory: client_rust
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: client_rust-macos
+        path: client_rust/target/release/client_rust

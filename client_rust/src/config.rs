@@ -21,10 +21,11 @@ impl AppConfig {
         let mut content = std::fs::read_to_string(path)?;
         
         // Simple expansion of ${VAR}
-        for (key, value) in std::env::vars() {
-            let target = format!("${{{}}}", key);
-            content = content.replace(&target, &value);
-        }
+        use regex::Regex;
+        let re = Regex::new(r"\$\{([^}]+)\}").unwrap();
+        let content = re.replace_all(&content, |caps: &regex::Captures| {
+            std::env::var(&caps[1]).unwrap_or_default()
+        }).to_string();
 
         let mut config: Self = serde_yaml::from_str(&content)?;
         

@@ -4,7 +4,6 @@ use client_rust::config::AppConfig;
 use client_rust::s3_backend::HamrahS3Backend;
 use s3s::service::S3ServiceBuilder;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -23,7 +22,7 @@ enum Commands {
         #[arg(short, long, default_value_t = 8080)]
         port: u16,
         #[arg(short, long)]
-        account: String,
+        account: Option<String>,
     },
     /// List objects in an account
     List {

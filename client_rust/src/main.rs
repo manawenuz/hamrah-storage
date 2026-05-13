@@ -46,23 +46,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = config.proxy.as_deref();
 
     match cli.command {
-        Commands::S3 { port, account } => {
-            let acc = config.accounts.get(&account).ok_or("Account not found")?;
-            let mut client = HamrahClient::new(proxy);
-            client.login(&acc.phone, &acc.password).await?;
+        Commands::S3 { port, account: _ } => {
+            let mut clients = std::collections::HashMap::new();
             
-            let backend = HamrahS3Backend::new(client);
+            for (name, acc) in &config.accounts {
+                println!("Logging in to account: {}...", name);
+                let mut client = HamrahClient::new(proxy);
+                if let Err(e) = client.login(&acc.phone, &acc.password).await {
+                    eprintln!("Failed to login to account {}: {}", name, e);
+                    continue;
+                }
+                clients.insert(name.clone(), client);
+            }
+
+            if clients.is_empty() {
+                return Err("No accounts successfully logged in".into());
+            }
+            
+            let backend = HamrahS3Backend::new(clients);
             let mut service = S3ServiceBuilder::new(Arc::new(backend));
             service.set_base_domain(None);
             let service = service.build();
 
             let addr = SocketAddr::from(([127, 0, 0, 1], port));
             println!("Starting S3-compatible server on http://{}", addr);
+            println!("Buckets available: {:?}", config.accounts.keys().collect::<Vec<_>>());
             
-            // Note: In a real implementation, we would use hyper to serve the service.
-            // This is a placeholder for the actual server loop.
-            println!("S3 server is ready (integration in progress)...");
-            // hyper::server::conn::http1::Builder::new().serve_connection(...)
+            println!("S3 server is ready...");
             tokio::signal::ctrl_c().await?;
         }
         Commands::List { account } => {

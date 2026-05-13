@@ -81,20 +81,25 @@ The most powerful feature of this client is providing an **S3-compatible endpoin
 
 ### Step 2: Configure your Backup Tool
 
+In S3 mode, each account defined in your `config.yaml` is exposed as a **separate bucket**. Changing the bucket name in your backup tool automatically switches the target HamrahStorage account.
+
 #### For **rustic**:
 ```bash
-# Initialize a repository
-rustic -r s3:http://localhost:8080/my-bucket init
+# Initialize account 'my_personal'
+rustic -r s3:http://localhost:8080/my_personal init
 
-# Perform a backup
-rustic -r s3:http://localhost:8080/my-bucket backup /path/to/data
+# Initialize account 'backup_account'
+rustic -r s3:http://localhost:8080/backup_account init
+
+# Perform a backup to 'my_personal'
+rustic -r s3:http://localhost:8080/my_personal backup /path/to/data
 ```
 
 #### For **duplicati**:
 1. Select **S3 Compatible** as the storage type.
 2. **Server**: `Custom server URL` -> `http://localhost:8080`
-3. **Bucket Name**: Any name (e.g., `my-backup`).
-4. **AWS Access Key / Secret Key**: Use any values (the proxy handles auth via `config.yaml`).
+3. **Bucket Name**: Set this to your account name from `config.yaml` (e.g., `my_personal` or `backup_account`).
+4. **AWS Access Key / Secret Key**: Use any placeholder values (the proxy handles real auth via its own config).
 
 ---
 

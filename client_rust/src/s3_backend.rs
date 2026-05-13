@@ -5,28 +5,32 @@ use crate::HamrahClient;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use std::collections::HashMap;
+
 pub struct HamrahS3Backend {
-    client: Arc<Mutex<HamrahClient>>,
+    clients: Arc<Mutex<HashMap<String, HamrahClient>>>,
 }
 
 impl HamrahS3Backend {
-    pub fn new(client: HamrahClient) -> Self {
+    pub fn new(clients: HashMap<String, HamrahClient>) -> Self {
         Self {
-            client: Arc::new(Mutex::new(client)),
+            clients: Arc::new(Mutex::new(clients)),
         }
     }
 }
 
 #[async_trait]
 impl S3 for HamrahS3Backend {
-    async fn list_objects_v2(&self, _input: ListObjectsV2Input) -> S3Result<ListObjectsV2Output> {
-        let client = self.client.lock().await;
+    async fn list_objects_v2(&self, input: ListObjectsV2Input) -> S3Result<ListObjectsV2Output> {
+        let clients = self.clients.lock().await;
+        let client = clients.get(&input.bucket).ok_or(S3Error::new(S3ErrorCode::NoSuchBucket))?;
+        
         let objects = client.list_objects().await.map_err(|_| S3Error::new(S3ErrorCode::InternalError))?;
         
         let contents: Vec<Object> = objects.into_iter().map(|obj| {
             let mut s3_obj = Object::default();
             s3_obj.key = Some(obj.name);
-            s3_obj.size = Some(0); // We don't have size in the simple list yet, but we could add it
+            s3_obj.size = Some(0); 
             s3_obj
         }).collect();
 
@@ -38,6 +42,9 @@ impl S3 for HamrahS3Backend {
     }
 
     async fn put_object(&self, input: PutObjectInput) -> S3Result<PutObjectOutput> {
+        let clients = self.clients.lock().await;
+        let client = clients.get(&input.bucket).ok_or(S3Error::new(S3ErrorCode::NoSuchBucket))?;
+        
         let key = input.key;
         let body = input.body.ok_or(S3Error::new(S3ErrorCode::InvalidRequest))?;
         
@@ -54,7 +61,6 @@ impl S3 for HamrahS3Backend {
         let temp_path = std::env::temp_dir().join(&key);
         std::fs::write(&temp_path, data).map_err(|_| S3Error::new(S3ErrorCode::InternalError))?;
         
-        let client = self.client.lock().await;
         client.upload_file(&temp_path).await.map_err(|_| S3Error::new(S3ErrorCode::InternalError))?;
         
         std::fs::remove_file(temp_path).ok();
@@ -63,7 +69,9 @@ impl S3 for HamrahS3Backend {
     }
 
     async fn head_object(&self, input: HeadObjectInput) -> S3Result<HeadObjectOutput> {
-        let client = self.client.lock().await;
+        let clients = self.clients.lock().await;
+        let client = clients.get(&input.bucket).ok_or(S3Error::new(S3ErrorCode::NoSuchBucket))?;
+        
         let objects = client.list_objects().await.map_err(|_| S3Error::new(S3ErrorCode::InternalError))?;
         
         if let Some(_obj) = objects.iter().find(|o| o.name == input.key) {

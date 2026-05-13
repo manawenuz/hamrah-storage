@@ -64,14 +64,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             
             let backend = HamrahS3Backend::new(clients);
-            let _service = S3ServiceBuilder::new(backend).build();
+            let service = S3ServiceBuilder::new(backend).build();
 
             let addr = SocketAddr::from(([127, 0, 0, 1], port));
+            let listener = tokio::net::TcpListener::bind(addr).await?;
             println!("Starting S3-compatible server on http://{}", addr);
             println!("Buckets available: {:?}", config.accounts.keys().collect::<Vec<_>>());
             
-            println!("S3 server is ready...");
-            tokio::signal::ctrl_c().await?;
+            loop {
+                let (stream, _) = listener.accept().await?;
+                let service = service.clone();
+                tokio::spawn(async move {
+                    let conn = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service);
+                    if let Err(err) = conn.await {
+                        eprintln!("Error serving connection: {:?}", err);
+                    }
+                });
+            }
         }
         Commands::List { account } => {
             let acc = config.accounts.get(&account).ok_or("Account not found")?;

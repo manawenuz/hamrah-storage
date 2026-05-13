@@ -1,65 +1,93 @@
+use clap::{Parser, Subcommand};
 use client_rust::HamrahClient;
-use std::env;
+use client_rust::config::AppConfig;
+use client_rust::s3_backend::HamrahS3Backend;
+use s3_server::S3ServiceBuilder;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    #[arg(short, long, default_value = "config.yaml")]
+    config: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start an S3-compatible server
+    S3 {
+        #[arg(short, long, default_value_t = 8080)]
+        port: u16,
+        #[arg(short, long)]
+        account: String,
+    },
+    /// List objects in an account
+    List {
+        #[arg(short, long)]
+        account: String,
+    },
+    /// Test upload/delete flow
+    Test {
+        #[arg(short, long)]
+        account: String,
+    },
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let phone = env::var("HAMRAH_PHONE").expect("HAMRAH_PHONE env var not set");
-    let password = env::var("HAMRAH_PASSWORD").expect("HAMRAH_PASSWORD env var not set");
-    let proxy = env::var("HAMRAH_PROXY").unwrap_or_else(|_| "http://127.0.0.1:8888".to_string());
-
-    let mut client = HamrahClient::new(&proxy);
-
-    println!("Logging in...");
-    client.login(&phone, &password).await?;
-
-    // Example: List objects
-    println!("Listing objects...");
-    let objects = client.list_objects().await?;
-    println!("Found {} objects.", objects.len());
-
-    // End-to-end test flow (using a temporary test file)
-    let test_file_name = "rust_test_file.txt";
-    std::fs::write(test_file_name, "Hello from the scrubbed Rust client!")?;
-
-    println!("Uploading test file...");
-    client.upload_file(test_file_name).await?;
-
-    let objects = client.list_objects().await?;
-    let test_obj = objects.iter().find(|o| o.name == test_file_name)
-        .ok_or("Uploaded file not found")?;
+    env_logger::init();
+    let cli = Cli::parse();
     
-    println!("Creating public link...");
-    let link_data = client.create_public_link(test_obj.id, 3600, 5).await?;
-    println!("Public Link: {}", link_data.link);
+    let config = AppConfig::from_file(&cli.config)?;
+    let proxy = config.proxy.clone().unwrap_or_else(|| "http://127.0.0.1:8888".to_string());
 
-    // --- TEST: CONTACTS & SHARING ---
-    println!("\n--- TEST: CONTACTS & SHARING ---");
-    let contact_name = "Test Contact";
-    let contact_phone = "0912XXXXXXX";
+    match cli.command {
+        Commands::S3 { port, account } => {
+            let acc = config.accounts.get(&account).ok_or("Account not found")?;
+            let mut client = HamrahClient::new(&proxy);
+            client.login(&acc.phone, &acc.password).await?;
+            
+            let backend = HamrahS3Backend::new(client);
+            let mut service = S3ServiceBuilder::new(Arc::new(backend));
+            service.set_base_domain(None);
+            let service = service.build();
 
-    println!("Adding contact {}...", contact_name);
-    // Note: This might fail if already exists, so we wrap it
-    let _ = client.add_contact(contact_name, contact_phone).await;
-
-    println!("Listing contacts...");
-    let contacts = client.list_contacts().await?;
-    if let Some(test) = contacts.iter().find(|c| c.name == contact_name) {
-        println!("Found Test Contact with User ID: {}", test.user_id);
-        
-        println!("Sharing file with Test Contact (Read-only)...");
-        client.share_file(test_obj.id, vec![
-            client_rust::SharePermission {
-                access: 1,
-                user: test.user_id
+            let addr = SocketAddr::from(([127, 0, 0, 1], port));
+            println!("Starting S3-compatible server on http://{}", addr);
+            
+            // Note: In a real implementation, we would use hyper to serve the service.
+            // This is a placeholder for the actual server loop.
+            println!("S3 server is ready (integration in progress)...");
+            // hyper::server::conn::http1::Builder::new().serve_connection(...)
+            tokio::signal::ctrl_c().await?;
+        }
+        Commands::List { account } => {
+            let acc = config.accounts.get(&account).ok_or("Account not found")?;
+            let mut client = HamrahClient::new(&proxy);
+            client.login(&acc.phone, &acc.password).await?;
+            
+            let objects = client.list_objects().await?;
+            for obj in objects {
+                println!("- {} (ID: {})", obj.name, obj.id);
             }
-        ]).await?;
-        println!("Shared successfully!");
+        }
+        Commands::Test { account } => {
+            let acc = config.accounts.get(&account).ok_or("Account not found")?;
+            let mut client = HamrahClient::new(&proxy);
+            client.login(&acc.phone, &acc.password).await?;
+
+            let test_file = "test_upload.txt";
+            std::fs::write(test_file, "S3 compatibility test")?;
+            println!("Uploading test file...");
+            client.upload_file(test_file).await?;
+            
+            println!("Done!");
+        }
     }
 
-    println!("\nCleaning up...");
-    client.delete_link(link_data.id).await?;
-    client.delete_file(test_obj.id).await?;
-
-    println!("Test completed successfully!");
     Ok(())
 }

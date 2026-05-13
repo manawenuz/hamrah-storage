@@ -28,6 +28,29 @@ impl CachedListing {
 
 type ClientMap = Arc<HashMap<String, Arc<Mutex<HamrahClient>>>>;
 
+/// Encode an S3 key to a flat Hamrah-compatible filename.
+/// Hamrah rejects slashes; encode `%` → `%25` and `/` → `%2F`.
+fn encode_key(key: &str) -> String {
+    key.replace('%', "%25").replace('/', "%2F")
+}
+
+/// Decode a Hamrah filename back to an S3 key.
+fn decode_key(name: &str) -> String {
+    name.replace("%2F", "/").replace("%25", "%")
+}
+
+/// Build an S3 Object from a Hamrah object, decoding the name back to an S3 key.
+fn to_s3_object(obj: &HamrahObject) -> s3s::dto::Object {
+    let mut s3_obj = s3s::dto::Object::default();
+    s3_obj.key = Some(decode_key(&obj.name));
+    s3_obj.size = obj.size.map(|s| s as i64);
+    s3_obj.e_tag = obj.etag.clone().map(ETag::Strong);
+    s3_obj.last_modified = obj.last_modified.map(|ts| {
+        Timestamp::from(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64))
+    });
+    s3_obj
+}
+
 pub struct HamrahS3Backend {
     clients: ClientMap,
     cache: Arc<Mutex<HashMap<String, CachedListing>>>,
@@ -77,27 +100,25 @@ impl HamrahS3Backend {
     async fn invalidate(&self, bucket: &str) {
         self.cache.lock().await.remove(bucket);
     }
-}
 
-#[async_trait]
-impl S3 for HamrahS3Backend {
-    async fn list_objects_v2(&self, req: S3Request<ListObjectsV2Input>) -> S3Result<S3Response<ListObjectsV2Output>> {
-        let input = req.input;
-        eprintln!("[list_objects_v2] bucket='{}' prefix={:?} delimiter={:?} max_keys={:?}", input.bucket, input.prefix, input.delimiter, input.max_keys);
-        let objects = self.list_cached(&input.bucket).await
-            .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
+    /// Find an object by its S3 key (which is the decoded form of the stored Hamrah name).
+    fn find_by_key<'a>(objects: &'a [HamrahObject], key: &str) -> Option<&'a HamrahObject> {
+        let encoded = encode_key(key);
+        objects.iter().find(|o| o.name == encoded)
+    }
 
-        let prefix = input.prefix.as_deref().unwrap_or("");
-        let delimiter = input.delimiter.as_deref();
-
+    fn filter_objects(objects: Vec<HamrahObject>, prefix: &str, delimiter: Option<&str>)
+        -> (Vec<s3s::dto::Object>, Vec<CommonPrefix>)
+    {
         let mut common_prefixes: Vec<String> = Vec::new();
         let mut contents: Vec<s3s::dto::Object> = Vec::new();
 
         for obj in objects {
-            if !obj.name.starts_with(prefix) {
+            let decoded = decode_key(&obj.name);
+            if !decoded.starts_with(prefix) {
                 continue;
             }
-            let suffix = &obj.name[prefix.len()..];
+            let suffix = &decoded[prefix.len()..];
             if let Some(delim) = delimiter {
                 if let Some(pos) = suffix.find(delim) {
                     let cp = format!("{}{}{}", prefix, &suffix[..pos], delim);
@@ -107,14 +128,7 @@ impl S3 for HamrahS3Backend {
                     continue;
                 }
             }
-            let mut s3_obj = s3s::dto::Object::default();
-            s3_obj.key = Some(obj.name);
-            s3_obj.size = obj.size.map(|s| s as i64);
-            s3_obj.e_tag = obj.etag.map(ETag::Strong);
-            s3_obj.last_modified = obj.last_modified.map(|ts| {
-                Timestamp::from(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64))
-            });
-            contents.push(s3_obj);
+            contents.push(to_s3_object(&obj));
         }
 
         let cp_output: Vec<CommonPrefix> = common_prefixes.into_iter().map(|p| {
@@ -123,11 +137,45 @@ impl S3 for HamrahS3Backend {
             cp
         }).collect();
 
+        (contents, cp_output)
+    }
+}
+
+#[async_trait]
+impl S3 for HamrahS3Backend {
+    async fn list_objects_v2(&self, req: S3Request<ListObjectsV2Input>) -> S3Result<S3Response<ListObjectsV2Output>> {
+        let input = req.input;
+        let objects = self.list_cached(&input.bucket).await
+            .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
+
+        let prefix = input.prefix.as_deref().unwrap_or("");
+        let delimiter = input.delimiter.as_deref();
+        let (contents, cp_output) = Self::filter_objects(objects, prefix, delimiter);
+
         let mut output = ListObjectsV2Output::default();
         output.name = Some(input.bucket);
         output.prefix = input.prefix;
         output.delimiter = input.delimiter;
         output.key_count = Some((contents.len() + cp_output.len()) as i32);
+        output.contents = if contents.is_empty() { None } else { Some(contents) };
+        output.common_prefixes = if cp_output.is_empty() { None } else { Some(cp_output) };
+        output.is_truncated = Some(false);
+        Ok(S3Response::new(output))
+    }
+
+    async fn list_objects(&self, req: S3Request<ListObjectsInput>) -> S3Result<S3Response<ListObjectsOutput>> {
+        let input = req.input;
+        let objects = self.list_cached(&input.bucket).await
+            .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
+
+        let prefix = input.prefix.as_deref().unwrap_or("");
+        let delimiter = input.delimiter.as_deref();
+        let (contents, cp_output) = Self::filter_objects(objects, prefix, delimiter);
+
+        let mut output = ListObjectsOutput::default();
+        output.name = Some(input.bucket);
+        output.prefix = input.prefix;
+        output.delimiter = input.delimiter;
         output.contents = if contents.is_empty() { None } else { Some(contents) };
         output.common_prefixes = if cp_output.is_empty() { None } else { Some(cp_output) };
         output.is_truncated = Some(false);
@@ -154,16 +202,23 @@ impl S3 for HamrahS3Backend {
             data.extend_from_slice(&chunk);
         }
 
-        // Hamrah doesn't allow slashes in names — use only the basename
-        let name = key.rsplit('/').next().unwrap_or(&key).to_string();
+        let name = encode_key(&key);
         let client = self.get_client(&bucket)?;
         client.lock().await
             .upload_bytes(&name, data).await
             .map_err(|e| { eprintln!("[put_object] upload error: {e}"); S3Error::with_message(s3s::S3ErrorCode::InternalError, e.to_string()) })?;
 
         self.invalidate(&bucket).await;
-
         Ok(S3Response::new(PutObjectOutput::default()))
+    }
+
+    async fn create_bucket(&self, req: S3Request<CreateBucketInput>) -> S3Result<S3Response<CreateBucketOutput>> {
+        // Buckets map to Hamrah accounts — they always exist; just ack the request
+        if self.clients.contains_key(&req.input.bucket) {
+            Ok(S3Response::new(CreateBucketOutput::default()))
+        } else {
+            Err(S3Error::with_message(s3s::S3ErrorCode::BucketAlreadyOwnedByYou, "Bucket not mapped to any account"))
+        }
     }
 
     async fn get_bucket_location(&self, _req: S3Request<GetBucketLocationInput>) -> S3Result<S3Response<GetBucketLocationOutput>> {
@@ -180,15 +235,11 @@ impl S3 for HamrahS3Backend {
 
     async fn head_object(&self, req: S3Request<HeadObjectInput>) -> S3Result<S3Response<HeadObjectOutput>> {
         let input = req.input;
-        eprintln!("[head_object] bucket='{}' key='{}'", input.bucket, input.key);
         let objects = self.list_cached(&input.bucket).await
             .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
 
-        let obj = objects.iter().find(|o| o.name == input.key)
-            .ok_or_else(|| {
-                eprintln!("[head_object] key='{}' not found (have {} objects)", input.key, objects.len());
-                S3Error::with_message(s3s::S3ErrorCode::NoSuchKey, "Key not found")
-            })?;
+        let obj = Self::find_by_key(&objects, &input.key)
+            .ok_or_else(|| S3Error::with_message(s3s::S3ErrorCode::NoSuchKey, "Key not found"))?;
 
         let mut out = HeadObjectOutput::default();
         out.content_length = obj.size.map(|s| s as i64);
@@ -205,7 +256,7 @@ impl S3 for HamrahS3Backend {
         let objects = self.list_cached(&input.bucket).await
             .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
 
-        let obj = objects.iter().find(|o| o.name == input.key)
+        let obj = Self::find_by_key(&objects, &input.key)
             .ok_or_else(|| S3Error::with_message(s3s::S3ErrorCode::NoSuchKey, "Key not found"))?
             .clone();
 
@@ -213,13 +264,27 @@ impl S3 for HamrahS3Backend {
             .ok_or_else(|| S3Error::with_message(s3s::S3ErrorCode::InternalError, "No download_url for object"))?;
 
         let client = self.get_client(&input.bucket)?;
-        let data = client.lock().await
+        let full_data = client.lock().await
             .download_object(&dl_url).await
-            .map_err(|e| { eprintln!("[get_object] download error: {e}"); S3Error::with_message(s3s::S3ErrorCode::InternalError, e.to_string()) })?;
+            .map_err(|e| S3Error::with_message(s3s::S3ErrorCode::InternalError, e.to_string()))?;
 
+        let total_len = full_data.len() as u64;
         let mut out = GetObjectOutput::default();
+
+        let data = if let Some(range) = input.range {
+            let byte_range = range.check(total_len)
+                .map_err(|_| S3Error::from(s3s::S3ErrorCode::InvalidRange))?;
+            let start = byte_range.start as usize;
+            let end = byte_range.end as usize;
+            out.content_range = Some(format!("bytes {}-{}/{}", byte_range.start, byte_range.end - 1, total_len));
+            out.content_length = Some((end - start) as i64);
+            full_data[start..end].to_vec()
+        } else {
+            out.content_length = Some(total_len as i64);
+            full_data
+        };
+
         out.body = Some(StreamingBlob::from(s3s::Body::from(bytes::Bytes::from(data))));
-        out.content_length = obj.size.map(|s| s as i64);
         out.e_tag = obj.etag.map(ETag::Strong);
         out.last_modified = obj.last_modified.map(|ts| {
             Timestamp::from(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64))
@@ -233,7 +298,7 @@ impl S3 for HamrahS3Backend {
         let objects = self.list_cached(&input.bucket).await
             .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
 
-        let obj_id = objects.iter().find(|o| o.name == input.key)
+        let obj_id = Self::find_by_key(&objects, &input.key)
             .ok_or_else(|| S3Error::with_message(s3s::S3ErrorCode::NoSuchKey, "Key not found"))?.id;
 
         let client = self.get_client(&input.bucket)?;
@@ -298,11 +363,10 @@ impl S3 for HamrahS3Backend {
         parts.sort_by_key(|(n, _)| *n);
         let data: Vec<u8> = parts.into_iter().flat_map(|(_, d)| d).collect();
 
-        // Hamrah doesn't allow slashes in names — use only the basename
-        let basename = name.rsplit('/').next().unwrap_or(&name).to_string();
+        let encoded_name = encode_key(&name);
         let client = self.get_client(&bucket)?;
         client.lock().await
-            .upload_bytes(&basename, data).await
+            .upload_bytes(&encoded_name, data).await
             .map_err(|e| { eprintln!("[complete_multipart] upload error: {e}"); S3Error::with_message(s3s::S3ErrorCode::InternalError, e.to_string()) })?;
 
         self.invalidate(&bucket).await;
@@ -324,7 +388,7 @@ impl S3 for HamrahS3Backend {
 
         for obj_id_ref in input.delete.objects {
             let key = obj_id_ref.key;
-            if let Some(obj) = objects.iter().find(|o| o.name == key) {
+            if let Some(obj) = Self::find_by_key(&objects, &key) {
                 let id = obj.id;
                 let result = {
                     let client = self.get_client(&bucket)?;

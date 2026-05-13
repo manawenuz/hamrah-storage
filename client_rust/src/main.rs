@@ -56,6 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 clients.insert(name.clone(), client);
+                println!("Login successful for account: {}", name);
             }
 
             if clients.is_empty() {

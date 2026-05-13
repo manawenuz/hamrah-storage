@@ -74,6 +74,7 @@ impl HamrahClient {
 
         let client = client_builder
             .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("Failed to build reqwest client");
 

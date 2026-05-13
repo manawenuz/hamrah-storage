@@ -43,12 +43,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     
     let config = AppConfig::from_file(&cli.config)?;
-    let proxy = config.proxy.clone().unwrap_or_else(|| "http://127.0.0.1:8888".to_string());
+    let proxy = config.proxy.as_deref();
 
     match cli.command {
         Commands::S3 { port, account } => {
             let acc = config.accounts.get(&account).ok_or("Account not found")?;
-            let mut client = HamrahClient::new(&proxy);
+            let mut client = HamrahClient::new(proxy);
             client.login(&acc.phone, &acc.password).await?;
             
             let backend = HamrahS3Backend::new(client);
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::List { account } => {
             let acc = config.accounts.get(&account).ok_or("Account not found")?;
-            let mut client = HamrahClient::new(&proxy);
+            let mut client = HamrahClient::new(proxy);
             client.login(&acc.phone, &acc.password).await?;
             
             let objects = client.list_objects().await?;
@@ -77,11 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Test { account } => {
             let acc = config.accounts.get(&account).ok_or("Account not found")?;
-            let mut client = HamrahClient::new(&proxy);
+            let mut client = HamrahClient::new(proxy);
             client.login(&acc.phone, &acc.password).await?;
 
             let test_file = "test_upload.txt";
-            std::fs::write(test_file, "S3 compatibility test")?;
+            std::fs::write(test_file, "Client test content")?;
             println!("Uploading test file...");
             client.upload_file(test_file).await?;
             

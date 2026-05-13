@@ -58,8 +58,13 @@ pub struct HamrahClient {
 }
 
 impl HamrahClient {
-    pub fn new(proxy_url: &str) -> Self {
-        let proxy = Proxy::all(proxy_url).expect("Invalid proxy URL");
+    pub fn new(proxy_url: Option<&str>) -> Self {
+        let mut client_builder = Client::builder();
+
+        if let Some(url) = proxy_url {
+            let proxy = Proxy::all(url).expect("Invalid proxy URL");
+            client_builder = client_builder.proxy(proxy);
+        }
         
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".parse().unwrap());
@@ -68,8 +73,7 @@ impl HamrahClient {
         headers.insert("Origin", "https://abrehamrahi.ir".parse().unwrap());
         headers.insert("Referer", "https://abrehamrahi.ir/auth/login".parse().unwrap());
 
-        let client = Client::builder()
-            .proxy(proxy)
+        let client = client_builder
             .default_headers(headers)
             .build()
             .expect("Failed to build reqwest client");

@@ -4,5 +4,5 @@ accounts:
     password: "YourPassword"
     webdav_user: "admin"
     webdav_pass: "admin"
-proxy: "http://127.0.0.1:8888"
+# proxy: "http://127.0.0.1:8888" # Optional
 s3_port: 8080

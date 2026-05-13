@@ -392,7 +392,7 @@ impl S3 for HamrahS3Backend {
                 let id = obj.id;
                 let result = {
                     let client = self.get_client(&bucket)?;
-                    let mut guard = client.lock().await;
+                    let guard = client.lock().await;
                     guard.delete_file(id).await
                 };
                 match result {

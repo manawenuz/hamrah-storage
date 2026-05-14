@@ -150,6 +150,51 @@ class HamrahClient {
     console.log(`Successfully moved ${fileName} to trash.`);
   }
 
+  // --- 7. RENAME FILE ---
+  async renameFile(fileName, newName) {
+    const objId = await this.getObjId(fileName);
+    const token = await this.getToken();
+
+    console.log(`Renaming ${fileName} to ${newName} (ID: ${objId})...`);
+    const response = await this.page.request.post('https://abrehamrahi.ir/api/v2/rgw/rename-object/', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { obj_id: objId, name: newName }
+    });
+
+    if (!response.ok()) throw new Error(`Rename failed: ${await response.text()}`);
+    console.log(`Successfully renamed ${fileName} to ${newName}.`);
+  }
+
+  // --- 8. COPY FILE ---
+  async copyFile(fileName, newName, targetParentId = null) {
+    const objId = await this.getObjId(fileName);
+    const token = await this.getToken();
+
+    console.log(`Copying ${fileName} to ${newName} (ID: ${objId})...`);
+    const response = await this.page.request.post('https://abrehamrahi.ir/api/v5/rgw/copy-object/', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { source_obj_id: objId, target_parent_id: targetParentId, new_name: newName }
+    });
+
+    if (!response.ok()) throw new Error(`Copy failed: ${await response.text()}`);
+    console.log(`Successfully copied ${fileName} as ${newName}.`);
+  }
+
+  // --- 9. MOVE FILE ---
+  async moveFile(fileName, targetParentId) {
+    const objId = await this.getObjId(fileName);
+    const token = await this.getToken();
+
+    console.log(`Moving ${fileName} to parent ${targetParentId} (ID: ${objId})...`);
+    const response = await this.page.request.post('https://abrehamrahi.ir/api/v2/rgw/move-object/', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { source_obj_id: objId, target_parent_id: targetParentId }
+    });
+
+    if (!response.ok()) throw new Error(`Move failed: ${await response.text()}`);
+    console.log(`Successfully moved ${fileName}.`);
+  }
+
   async close() {
     if (this.browser) await this.browser.close();
   }

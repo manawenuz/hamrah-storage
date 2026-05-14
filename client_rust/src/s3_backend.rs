@@ -30,12 +30,12 @@ type ClientMap = Arc<HashMap<String, Arc<Mutex<HamrahClient>>>>;
 
 /// Encode an S3 key to a flat Hamrah-compatible filename.
 /// Hamrah rejects slashes; encode `%` → `%25` and `/` → `%2F`.
-fn encode_key(key: &str) -> String {
+pub fn encode_key(key: &str) -> String {
     key.replace('%', "%25").replace('/', "%2F")
 }
 
 /// Decode a Hamrah filename back to an S3 key.
-fn decode_key(name: &str) -> String {
+pub fn decode_key(name: &str) -> String {
     name.replace("%2F", "/").replace("%25", "%")
 }
 
@@ -428,6 +428,49 @@ impl S3 for HamrahS3Backend {
         let upload_id = req.input.upload_id;
         self.multiparts.lock().await.remove(&upload_id);
         Ok(S3Response::new(AbortMultipartUploadOutput::default()))
+    }
+
+    async fn copy_object(&self, req: S3Request<CopyObjectInput>) -> S3Result<S3Response<CopyObjectOutput>> {
+        let input = req.input;
+        let dest_bucket = input.bucket.clone();
+        let dest_key = input.key.clone();
+
+        // copy_source is already parsed by s3s from the x-amz-copy-source header
+        let copy_source = input.copy_source;
+
+        let (source_bucket, source_key) = match copy_source {
+            s3s::dto::CopySource::Bucket { bucket, key, .. } => (bucket.to_string(), key.to_string()),
+            s3s::dto::CopySource::AccessPoint { .. } => {
+                return Err(S3Error::with_message(s3s::S3ErrorCode::NotImplemented, "AccessPoint copy source not supported"));
+            }
+        };
+
+        if source_bucket != dest_bucket {
+            return Err(S3Error::with_message(s3s::S3ErrorCode::NotImplemented, "Cross-bucket copy not supported"));
+        }
+
+        let objects = self.list_cached(&dest_bucket).await
+            .map_err(|_| S3Error::with_message(s3s::S3ErrorCode::InternalError, "API error"))?;
+
+        let source_obj = Self::find_by_key(&objects, &source_key)
+            .ok_or_else(|| S3Error::with_message(s3s::S3ErrorCode::NoSuchKey, "Source key not found"))?;
+
+        let dest_name = encode_key(&dest_key);
+        let client = self.get_client(&dest_bucket)?;
+        client.lock().await
+            .copy_object(source_obj.id, None, &dest_name).await
+            .map_err(|e| S3Error::with_message(s3s::S3ErrorCode::InternalError, e.to_string()))?;
+
+        self.invalidate(&dest_bucket).await;
+
+        let mut out = CopyObjectOutput::default();
+        let mut result = CopyObjectResult::default();
+        result.e_tag = source_obj.etag.clone().map(ETag::Strong);
+        result.last_modified = source_obj.last_modified.map(|ts| {
+            Timestamp::from(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64))
+        });
+        out.copy_object_result = Some(result);
+        Ok(S3Response::new(out))
     }
 }
 

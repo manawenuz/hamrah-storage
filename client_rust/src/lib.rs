@@ -1,5 +1,6 @@
 pub mod config;
 pub mod s3_backend;
+pub mod webdav_server;
 use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,6 +17,7 @@ pub struct Object {
     #[serde(rename = "type")]
     pub content_type: Option<String>,
     pub download_url: Option<String>,
+    pub parent_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ pub struct SharePermission {
     pub user: u64,   // The user_id of the contact
 }
 
+#[derive(Clone)]
 pub struct HamrahClient {
     client: Client,
     token: Option<String>,
@@ -191,8 +194,8 @@ impl HamrahClient {
         rb
     }
 
-    async fn fetch_objects(&self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
-        let resp = self.authed_request(reqwest::Method::GET, "/api/v2/flat/list-objects/?is_trash=false&limit=1000")
+    async fn fetch_objects_url(&self, path: &str) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
+        let resp = self.authed_request(reqwest::Method::GET, path)
             .send()
             .await?;
         if !resp.status().is_success() {
@@ -202,12 +205,34 @@ impl HamrahClient {
         Ok(data.results)
     }
 
+    async fn fetch_objects(&self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
+        self.fetch_objects_url("/api/v2/flat/list-objects/?is_trash=false&limit=1000").await
+    }
+
     pub async fn list_objects(&mut self) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
         let needs_refresh = self.fetch_objects().await.is_err();
         if needs_refresh {
             self.relogin().await?;
         }
         self.fetch_objects().await
+    }
+
+    pub async fn list_objects_by_parent(&mut self, parent_id: u64) -> Result<Vec<Object>, Box<dyn std::error::Error>> {
+        let url = format!("/api/v2/flat/list-objects/?is_trash=false&limit=1000&parent_id={}", parent_id);
+        log::info!("[list_objects_by_parent] fetching parent_id={}", parent_id);
+        let first_err = match self.fetch_objects_url(&url).await {
+            Ok(objects) => {
+                log::info!("[list_objects_by_parent] got {} objects for parent_id={}", objects.len(), parent_id);
+                return Ok(objects);
+            }
+            Err(e) => e.to_string(),
+        };
+        log::warn!("[list_objects_by_parent] first attempt failed: {}", first_err);
+        if first_err.contains("401") || first_err.contains("token_not_valid") || first_err.contains("Token is expired") || first_err.contains("503") {
+            self.relogin().await?;
+        }
+        let url2 = format!("/api/v2/flat/list-objects/?is_trash=false&limit=1000&parent_id={}", parent_id);
+        self.fetch_objects_url(&url2).await
     }
 
     pub async fn upload_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
@@ -371,6 +396,69 @@ impl HamrahClient {
             Ok(())
         } else {
             Err(format!("Delete failed: {}", resp.text().await?).into())
+        }
+    }
+
+    pub async fn rename_object(&self, obj_id: u64, new_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let url = "/api/v2/rgw/rename-object/";
+        let resp = self.authed_request(reqwest::Method::POST, url)
+            .json(&json!({ "obj_id": obj_id, "name": new_name }))
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Rename failed: {}", resp.text().await?).into())
+        }
+    }
+
+    pub async fn copy_object(&self, source_obj_id: u64, target_parent_id: Option<u64>, new_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let url = "/api/v5/rgw/copy-object/";
+        let resp = self.authed_request(reqwest::Method::POST, url)
+            .json(&json!({
+                "source_obj_id": source_obj_id,
+                "target_parent_id": target_parent_id,
+                "new_name": new_name
+            }))
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Copy failed: {}", resp.text().await?).into())
+        }
+    }
+
+    pub async fn move_object(&self, source_obj_id: u64, target_parent_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        let url = "/api/v2/rgw/move-object/";
+        let resp = self.authed_request(reqwest::Method::POST, url)
+            .json(&json!({
+                "source_obj_id": source_obj_id,
+                "target_parent_id": target_parent_id
+            }))
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Move failed: {}", resp.text().await?).into())
+        }
+    }
+
+    pub async fn create_folder(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let url = "/api/v2/flat/create-folder/";
+        let resp = self.authed_request(reqwest::Method::POST, url)
+            .json(&json!({ "name": name }))
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Create folder failed: {}", resp.text().await?).into())
         }
     }
 

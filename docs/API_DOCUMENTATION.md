@@ -36,16 +36,22 @@ All API requests (except login) require the JWT Bearer Token:
 
 ## 2. File & Directory Management
 
-### List Objects
-Retrieves the files and directories inside your drive.
+### List Objects (flat)
+Retrieves all files and real folders at the account root.
 - **Endpoint:** `GET https://abrehamrahi.ir/api/v2/flat/list-objects/?is_trash=false&limit=1000`
 - **Response:** A JSON object with a `results` array. Each entry includes:
   - `id` — internal object ID (required for delete/share)
   - `name` — stored filename
   - `size` — file size in bytes
   - `last_modified` — Unix timestamp
-  - `type` — MIME type (e.g. `binary/octet-stream`)
+  - `type` — `"folder"` for real Hamrah directories, MIME type for files
   - `download_url` — direct CDN URL for downloading the file (e.g. `https://abrehamrahi.ir/o/...`)
+  - `parent_id` — ID of the containing folder (null for root)
+
+### List Objects by Parent Folder
+Retrieves children of a real Hamrah folder (type = `"folder"`).
+- **Endpoint:** `GET https://abrehamrahi.ir/api/v2/flat/list-objects/?is_trash=false&limit=1000&parent_id={id}`
+- **Notes:** Only returns direct children of the specified folder ID.
 
 ---
 
@@ -132,15 +138,108 @@ Once a file is uploaded, you can generate a public download link.
 
 ---
 
-## 6. Deleting a File (Move to Trash)
-To move a file to the trashcan:
-- **Method:** `DELETE`
-- **Endpoint:** `https://abrehamrahi.ir/api/v2/rgw/trash-objects/`
-- **Payload:** `{"obj_ids": [11269116]}`
+## 7. Rename, Copy, Move & Folders
+
+### Rename Object
+- **Method:** `POST`
+- **Endpoint:** `https://abrehamrahi.ir/api/v2/rgw/rename-object/`
+- **Payload:**
+  ```json
+  {
+    "obj_id": 11269116,
+    "name": "new_filename.txt"
+  }
+  ```
+
+### Copy Object
+- **Method:** `POST`
+- **Endpoint:** `https://abrehamrahi.ir/api/v5/rgw/copy-object/`
+- **Payload:**
+  ```json
+  {
+    "source_obj_id": 11269116,
+    "target_parent_id": null,   // null for root
+    "new_name": "copied_filename.txt"
+  }
+  ```
+
+### Move Object (Change Parent)
+- **Method:** `POST`
+- **Endpoint:** `https://abrehamrahi.ir/api/v2/rgw/move-object/`
+- **Payload:**
+  ```json
+  {
+    "source_obj_id": 11269116,
+    "target_parent_id": 11280635  // ID of the destination folder
+  }
+  ```
+
+### Create Folder
+- **Method:** `POST`
+- **Endpoint:** `https://abrehamrahi.ir/api/v2/flat/create-folder/`
+- **Payload:** `{"name": "New Folder"}`
 
 ---
 
-## 7. Contacts & Private Sharing
+## 8. Proxy CLI — S3 + WebDAV
+
+The `client_rust` binary exposes HamrahStorage as standard protocols.
+
+### Commands
+
+```
+# S3-compatible server only (default, recommended)
+cargo run -- serve --s3-port 1212
+
+# S3 + WebDAV (experimental, read-only WebDAV)
+cargo run -- serve --s3-port 1212 --webdav --webdav-port 8081
+
+# WebDAV only
+cargo run -- webdav --port 8081
+
+# List objects in an account
+cargo run -- list --account hamrah
+```
+
+### S3 Backend
+
+- Maps standard S3 verbs (`GetObject`, `PutObject`, `CopyObject`, `DeleteObject`, `ListObjectsV2`) to Hamrah REST APIs.
+- `CopyObject` is native (no download/re-upload): calls `/api/v5/rgw/copy-object/`.
+- Keys are encoded: `/` → `%2F`, `%` → `%25` so S3 paths survive as flat Hamrah filenames.
+- Compatible with `mc`, `rclone`, `rustic`, AWS SDKs.
+- 30-second listing cache; invalidated on mutations.
+
+### WebDAV Backend (experimental, read-only)
+
+- Serves HamrahStorage as a WebDAV Class 2 mount (`DAV: 1, 2`).
+- **Read-only**: PROPFIND, GET, HEAD, OPTIONS only. PUT/DELETE/MOVE/COPY return 405.
+- All listings are pre-warmed at startup and cached indefinitely (no TTL). The cache only updates when the server restarts or when S3 operations invalidate it.
+- Supports three directory types:
+  - **Real Hamrah folders** (e.g. `Manwe/`) — traversed via `?parent_id=` API.
+  - **S3 virtual directories** (e.g. `rustic-repo/`) — grouped from `%2F`-encoded flat keys.
+  - **Flat files** at account root.
+- Mount on macOS: Finder → Go → Connect to Server → `http://localhost:8081`.
+- Mount on Linux: `davfs2` or `cadaver`.
+- Known limitations: macOS Finder directory traversal can be unreliable on slow connections; restart the server to refresh the cache.
+
+### Configuration (`config.yaml`)
+
+```yaml
+accounts:
+  hamrah:
+    phone: "${HAMRAH_PHONE}"
+    password: "${HAMRAH_PASSWORD}"
+proxy: "${HAMRAH_PROXY}"   # optional HTTP proxy
+
+mc:
+  port: 1212
+  access_key: "anything"
+  secret_key: "anything"
+```
+
+---
+
+## 9. Contacts & Private Sharing
 You can share files privately with specific users by adding them as contacts.
 
 ### Add Contact

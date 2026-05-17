@@ -29,3 +29,4 @@ Sending any file / photo / video / voice / audio uploads it. Sending an `https:/
 - Telegram Bot API caps file *downloads* at ~20 MB. Larger files sent to the bot will fail; URL ingest is not affected.
 - Hamrah session tokens are persisted under `./data/.session_<phone>` so the bot reuses the session across restarts.
 - Built directly on the `client_rust` library in this repo — no S3 layer in between.
+- Set `TELEGRAM_PROXY` (e.g. `socks5h://user:pass@host:1080` or `http://host:8080`) if `api.telegram.org` is blocked from your network. `HAMRAH_PROXY` is independent.

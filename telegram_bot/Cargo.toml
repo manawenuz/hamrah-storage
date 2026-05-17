@@ -8,6 +8,8 @@ client_rust = { path = "../client_rust" }
 teloxide = { version = "0.13", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["stream"] }
+# Must match teloxide 0.13's reqwest major version for Bot::with_client
+reqwest011 = { package = "reqwest", version = "0.11", features = ["socks"] }
 url = "2"
 anyhow = "1"
 log = "0.4"

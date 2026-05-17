@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     let password = std::env::var("HAMRAH_PASSWORD").context("HAMRAH_PASSWORD env not set")?;
     let admin_ids_raw = std::env::var("ADMIN_IDS").context("ADMIN_IDS env not set (comma separated Telegram user ids)")?;
     let proxy = std::env::var("HAMRAH_PROXY").ok().filter(|s| !s.is_empty());
+    let tg_proxy = std::env::var("TELEGRAM_PROXY").ok().filter(|s| !s.is_empty());
 
     let admins: HashSet<i64> = admin_ids_raw
         .split(',')
@@ -67,7 +68,18 @@ async fn main() -> Result<()> {
     log::info!("Hamrah login OK");
     let client: Client = Arc::new(Mutex::new(client));
 
-    let bot = Bot::new(token);
+    let bot = if let Some(p) = tg_proxy.as_deref() {
+        log::info!("Using Telegram proxy: {p}");
+        let http = reqwest011::Client::builder()
+            .proxy(reqwest011::Proxy::all(p).context("invalid TELEGRAM_PROXY")?)
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .context("failed to build Telegram HTTP client")?;
+        Bot::with_client(token, http)
+    } else {
+        Bot::new(token)
+    };
 
     let msg_handler = Update::filter_message()
         .filter(|msg: Message, admins: Admins| {

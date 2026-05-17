@@ -61,11 +61,26 @@ async fn main() -> Result<()> {
     log::info!("Loaded {} admins", admins.len());
 
     let mut client = HamrahClient::new(proxy.as_deref());
-    client
-        .login(&phone, &password)
-        .await
-        .map_err(|e| anyhow!("Hamrah login failed: {e}"))?;
-    log::info!("Hamrah login OK");
+    let mut delay = std::time::Duration::from_secs(2);
+    let max_delay = std::time::Duration::from_secs(60);
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match client.login(&phone, &password).await {
+            Ok(()) => {
+                log::info!("Hamrah login OK (attempt {attempt})");
+                break;
+            }
+            Err(e) => {
+                log::warn!(
+                    "Hamrah login attempt {attempt} failed: {e}; retrying in {}s",
+                    delay.as_secs()
+                );
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(max_delay);
+            }
+        }
+    }
     let client: Client = Arc::new(Mutex::new(client));
 
     let bot = if let Some(p) = tg_proxy.as_deref() {

@@ -28,9 +28,9 @@ enum Cmd {
     List,
     #[command(description = "Browse / manage files with buttons.")]
     Manage,
-    #[command(description = "Publish a file by id: /publish <id>")]
+    #[command(description = "Publish a file by id: /publish [id]")]
     Publish(String),
-    #[command(description = "Delete a file by id: /delete <id>")]
+    #[command(description = "Delete a file by id: /delete [id]")]
     Delete(String),
     #[command(description = "Show your Telegram user id.")]
     Whoami,
@@ -117,6 +117,7 @@ async fn handle_command(bot: Bot, msg: Message, cmd: Cmd, client: Client) -> Res
     match cmd {
         Cmd::Help | Cmd::Start => {
             bot.send_message(msg.chat.id, Cmd::descriptions().to_string())
+                .parse_mode(teloxide::types::ParseMode::Html)
                 .await?;
         }
         Cmd::Whoami => {
@@ -130,7 +131,9 @@ async fn handle_command(bot: Bot, msg: Message, cmd: Cmd, client: Client) -> Res
                 c.list_objects().await.map_err(|e| anyhow!(e.to_string()))?
             };
             let text = format_list(&objs, 0);
-            bot.send_message(msg.chat.id, text).await?;
+            bot.send_message(msg.chat.id, text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
         }
         Cmd::Manage => {
             let objs = {
@@ -393,12 +396,13 @@ fn format_list(objs: &[Object], page: usize) -> String {
     let page = page.min(pages.saturating_sub(1));
     let start = page * PAGE_SIZE;
     let end = (start + PAGE_SIZE).min(objs.len());
-    let mut s = format!("Files (page {}/{}, {} total):\n", page + 1, pages.max(1), objs.len());
+    let mut s = format!("<b>Files</b> (page {}/{}, {} total):\n", page + 1, pages.max(1), objs.len());
     for o in &objs[start..end] {
         let size = o.size.map(human_size).unwrap_or_else(|| "-".into());
-        s.push_str(&format!("• `{}` — {} ({})\n", o.id, o.name, size));
+        let name = o.name.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        s.push_str(&format!("• <code>{}</code> — {} ({})\n", o.id, name, size));
     }
-    s.push_str("\nUse /publish <id> or /delete <id>, or /manage for buttons.");
+    s.push_str("\nUse <code>/publish [id]</code> or <code>/delete [id]</code>, or /manage for buttons.");
     s
 }
 

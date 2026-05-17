@@ -1,0 +1,13 @@
+services:
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: telegram_bot/Dockerfile
+    container_name: hamrah-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    working_dir: /data
+    volumes:
+      # Persist Hamrah session tokens (client_rust writes .session_<phone> to cwd)
+      - ./data:/data

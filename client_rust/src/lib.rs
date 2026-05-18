@@ -250,8 +250,14 @@ impl HamrahClient {
             Ok(()) => return Ok(()),
             Err(e) => e.to_string(),
         };
-        if first_err.contains("401") || first_err.contains("token_not_valid") || first_err.contains("Token is expired") || first_err.contains("503") {
-            eprintln!("[upload_bytes] token expired, re-logging in...");
+        if first_err.contains("401")
+            || first_err.contains("token_not_valid")
+            || first_err.contains("Token is expired")
+            || first_err.contains("503")
+            || first_err.contains("decoding response body")
+            || first_err.contains("error sending request")
+        {
+            eprintln!("[upload_bytes] transient/auth error ({first_err}); re-logging in and retrying...");
             self.relogin().await?;
             self.upload_bytes_inner(name, data).await
         } else {
@@ -267,6 +273,11 @@ impl HamrahClient {
             .send()
             .await?;
 
+        let start_status = start_resp.status();
+        if !start_status.is_success() {
+            let body = start_resp.text().await.unwrap_or_default();
+            return Err(format!("start-upload failed ({start_status}): {body}").into());
+        }
         let start_data: StartUploadResponse = start_resp.json().await?;
         let chunk_size = start_data.chunk_size as usize;
 

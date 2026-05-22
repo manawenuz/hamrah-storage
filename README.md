@@ -127,6 +127,10 @@ RUSTIC_PASSWORD="repopassword" \
   rustic forget --keep-last 5 --prune
 ```
 
+### Duplicati (Windows)
+
+See [docs/WINDOWS_DUPLICATI_SETUP.md](docs/WINDOWS_DUPLICATI_SETUP.md) for a step-by-step guide to backing up a Windows machine to HamrahStorage using Duplicati.
+
 ### mc (MinIO Client)
 
 ```bash
